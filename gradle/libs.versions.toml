@@ -14,6 +14,7 @@ composeBom = "2025.03.00"
 mapsCompose = "2.15.0"
 ui = "1.7.8"
 firebaseDatabaseKtx = "21.0.0"
+navigationCompose = "2.8.9"
 
 [libraries]
 accompanist-permissions = { module = "com.google.accompanist:accompanist-permissions", version.ref = "accompanistPermissions" }
@@ -39,6 +40,7 @@ maps-compose = { module = "com.google.maps.android:maps-compose", version.ref = 
 play-services-maps = { module = "com.google.android.gms:play-services-maps" }
 ui = { module = "androidx.compose.ui:ui", version.ref = "ui" }
 google-firebase-database-ktx = { group = "com.google.firebase", name = "firebase-database-ktx", version.ref = "firebaseDatabaseKtx" }
+androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
