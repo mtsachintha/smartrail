@@ -1,21 +1,22 @@
 {
   "project_info": {
-    "project_number": "859509984476",
-    "project_id": "smartrail-f3b9b",
-    "storage_bucket": "smartrail-f3b9b.firebasestorage.app"
+    "project_number": "656683421363",
+    "firebase_url": "https://smart-railway-1d2fd-default-rtdb.firebaseio.com",
+    "project_id": "smart-railway-1d2fd",
+    "storage_bucket": "smart-railway-1d2fd.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:859509984476:android:f0e7dadeb5e9dc8a58b819",
+        "mobilesdk_app_id": "1:656683421363:android:473e6f8e0ad439441eeac6",
         "android_client_info": {
-          "package_name": "com.singhastudios.smartrail"
+          "package_name": "Com.singhastudios.smartrail"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCSJLO2rGAfYzSP8YHAE4Ib6mk_FEZTkRw"
+          "current_key": "AIzaSyDxTud8nRSCPeYh3fGMmpPFe08c-ChnZwg"
         }
       ],
       "services": {

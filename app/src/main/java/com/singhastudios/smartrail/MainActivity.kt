@@ -73,12 +73,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.style.TextAlign
+import com.google.android.gms.maps.CameraUpdate
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Polyline
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -103,17 +112,20 @@ fun AppNavigation() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainContent(){
+fun MainContent() {
+    var showEditDialog by remember { mutableStateOf(false) }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text(
-                    text = "SmartRail",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1877F2)
-                ) },
+                title = {
+                    Text(
+                        text = "SmartRail",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF1877F2))
+                },
                 navigationIcon = {
                     Image(
                         painter = painterResource(id = R.drawable.train_main),
@@ -122,13 +134,99 @@ fun MainContent(){
                             .size(48.dp)
                             .padding(horizontal = 12.dp)
                     )
-
+                },
+                actions = {
+                    // Three dots menu icon
+                    IconButton(onClick = { showEditDialog = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Menu")
+                    }
                 }
             )
         }
     ) { innerPadding ->
         Column(modifier = Modifier.padding(innerPadding)) {
             SmartRailUI()
+        }
+
+        // Edit station dialog - moved here to be accessible from MainContent
+        if (showEditDialog) {
+            var stationName by remember { mutableStateOf("") }
+            var stationLat by remember { mutableStateOf("") }
+            var stationLon by remember { mutableStateOf("") }
+
+            // Firebase database reference
+            val database = FirebaseDatabase.getInstance("https://smart-railway-1d2fd-default-rtdb.firebaseio.com/")
+            val stationRef = database.getReference("station")
+
+            // Load current station data when dialog opens
+            LaunchedEffect(showEditDialog) {
+                if (showEditDialog) {
+                    stationRef.addListenerForSingleValueEvent(object : ValueEventListener {
+                        override fun onDataChange(snapshot: DataSnapshot) {
+                            stationName = snapshot.child("name").getValue(String::class.java) ?: ""
+                            stationLat = (snapshot.child("latitude").getValue(Double::class.java) ?: 0.0).toString()
+                            stationLon = (snapshot.child("longitude").getValue(Double::class.java) ?: 0.0).toString()
+                        }
+
+                        override fun onCancelled(error: DatabaseError) {
+                            Log.e("Firebase", "Error loading station data: ${error.message}")
+                        }
+                    })
+                }
+            }
+
+            AlertDialog(
+                onDismissRequest = { showEditDialog = false },
+                title = { Text("Edit Station Details") },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = stationName,
+                            onValueChange = { stationName = it },
+                            label = { Text("Station Name") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        OutlinedTextField(
+                            value = stationLat,
+                            onValueChange = { stationLat = it },
+                            label = { Text("Latitude") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        OutlinedTextField(
+                            value = stationLon,
+                            onValueChange = { stationLon = it },
+                            label = { Text("Longitude") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            try {
+                                val lat = stationLat.toDouble()
+                                val lon = stationLon.toDouble()
+                                stationRef.child("name").setValue(stationName)
+                                stationRef.child("latitude").setValue(lat)
+                                stationRef.child("longitude").setValue(lon)
+                                showEditDialog = false
+                            } catch (e: NumberFormatException) {
+                                // Handle invalid number input
+                                // You might want to show a toast or error message here
+                            }
+                        }
+                    ) {
+                        Text("Save")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = { showEditDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
     }
 }
@@ -165,8 +263,7 @@ fun SplashScreen(navController: NavController) {
                 text = "Connecting Journeys, Simplifying Travel",
                 fontSize = 14.sp,
                 color = Color.Gray,
-                modifier = Modifier.padding(top = 4.dp)
-            )
+                modifier = Modifier.padding(top = 4.dp))
         }
 
         // "Get Started" Button at the bottom center
@@ -186,6 +283,7 @@ fun SplashScreen(navController: NavController) {
             ) {
                 Text("Get Started", color = Color.White)
             }
+
         }
     }
 }
@@ -263,259 +361,202 @@ fun LoginScreen(navController: NavController) {
     }
 }
 
-
-
-
 @Composable
 fun SmartRailUI() {
-    var selectedStation by remember { mutableStateOf("Select Station") }
-    var trainLocation by remember { mutableStateOf(LatLng(7.4000, 79.8400)) }
-    var stationLocation by remember { mutableStateOf(LatLng(7.4500, 79.8500)) }
+    var stationName by remember { mutableStateOf("Loading...") }
+    var stationLocation by remember { mutableStateOf(LatLng(0.0, 0.0)) }
+    var trainLocation by remember { mutableStateOf(LatLng(0.0, 0.0)) }
     var distance by remember { mutableDoubleStateOf(0.0) }
-    val trainStatus by remember { mutableStateOf("Running") }
-    val expectedArrival by remember { mutableStateOf("21:49:00") }
     var gateControl by remember { mutableStateOf(false) }
     var lightControl by remember { mutableStateOf(false) }
-    var stations by remember { mutableStateOf<List<Station>>(emptyList()) }
+    var buzzerControl by remember { mutableStateOf(false) }
 
     // Firebase database reference
-    val database = FirebaseDatabase.getInstance("https://smartrail-f3b9b-default-rtdb.asia-southeast1.firebasedatabase.app/")
-    val trainRef = database.getReference("trains/049")
-    val stationsRef = database.getReference("stations")
+    val database = FirebaseDatabase.getInstance("https://smart-railway-1d2fd-default-rtdb.firebaseio.com/")
+    val stationRef = database.getReference("station")
+    val gpsRef = database.getReference("gps")
+    val servoRef = database.getReference("servo/servo1")
+    val ledRef = database.getReference("led/led1")
+    val buzzerRef = database.getReference("buzzer/buzzer1")
 
-    // Fetch stations from Firebase
+    // Fetch station data from Firebase
     LaunchedEffect(Unit) {
-        stationsRef.addValueEventListener(object : ValueEventListener {
+        stationRef.addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val stationList = mutableListOf<Station>()
-                snapshot.children.forEach { stationSnapshot ->
-                    val name = stationSnapshot.key ?: ""
-                    val lat = stationSnapshot.child("lat").getValue(Double::class.java) ?: 0.0
-                    val lon = stationSnapshot.child("lon").getValue(Double::class.java) ?:
-                    stationSnapshot.child("lan").getValue(Double::class.java) ?: 0.0
-                    stationList.add(Station(name, LatLng(lat, lon)))
-                }
-                stations = stationList
+                val name = snapshot.child("name").getValue(String::class.java) ?: "Unknown Station"
+                val lat = snapshot.child("latitude").getValue(Double::class.java) ?: 0.0
+                val lon = snapshot.child("longitude").getValue(Double::class.java) ?: 0.0
 
-                // Set default station if available
-                if (stations.isNotEmpty() && selectedStation == "Select Station") {
-                    selectedStation = stations.first().name
-                    stationLocation = stations.first().location
-                }
-            }
+                stationName = name
+                stationLocation = LatLng(lat, lon)
 
-            override fun onCancelled(error: DatabaseError) {
-                Log.e("Firebase", "Error fetching stations: ${error.message}")
-            }
-        })
-
-        // Listen for train location updates
-        trainRef.child("location").addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val lat = snapshot.child("lat").getValue(Double::class.java) ?: 0.0
-                val lng = snapshot.child("lng").getValue(Double::class.java) ?: 0.0
-                trainLocation = LatLng(lat, lng)
-
-                // Update distance when train location changes
+                // Recalculate distance when station updates
                 distance = calculateDistance(trainLocation, stationLocation)
             }
 
             override fun onCancelled(error: DatabaseError) {
-                Log.e("Firebase", "Error fetching train location: ${error.message}")
+                Log.e("Firebase", "Error fetching station: ${error.message}")
             }
         })
+
+        gpsRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val lat = snapshot.child("latitude").getValue(Double::class.java) ?: 0.0
+                val lon = snapshot.child("longitude").getValue(Double::class.java) ?: 0.0
+
+                trainLocation = LatLng(lat, lon)
+
+                // Recalculate distance when train location updates
+                distance = calculateDistance(trainLocation, stationLocation)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.e("Firebase", "Error fetching GPS: ${error.message}")
+            }
+        })
+
+        // Listen to servo state
+        servoRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                gateControl = snapshot.getValue(Boolean::class.java) ?: false
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.e("Firebase", "Error fetching servo state: ${error.message}")
+            }
+        })
+
+        // Listen to LED state
+        ledRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                lightControl = snapshot.getValue(Boolean::class.java) ?: false
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.e("Firebase", "Error fetching LED state: ${error.message}")
+            }
+        })
+
+        // Listen to buzzer state
+        buzzerRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                buzzerControl = snapshot.getValue(Boolean::class.java) ?: false
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.e("Firebase", "Error fetching buzzer state: ${error.message}")
+            }
+        })
+    }
+
+    // Handle control switches
+    fun onGateControlChanged(newValue: Boolean) {
+        gateControl = newValue
+        servoRef.setValue(newValue)
+    }
+
+    fun onLightControlChanged(newValue: Boolean) {
+        lightControl = newValue
+        ledRef.setValue(newValue)
+    }
+
+    fun onBuzzerControlChanged(newValue: Boolean) {
+        buzzerControl = newValue
+        buzzerRef.setValue(newValue)
     }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(text = selectedStation, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-        Spacer(modifier = Modifier.height(16.dp)) // This will now work
+        Text(text = stationName,
+            fontWeight = FontWeight.Bold,
+            fontSize = 20.sp)
+
         // Google Map View
-        MapView(trainLocation, stationLocation)
-
-        // Dropdown for station selection
-        StationDropdown(
-            stations = stations,
-            selectedStation = selectedStation,
-            onStationSelected = { station ->
-                selectedStation = station.name
-                stationLocation = station.location
-                distance = calculateDistance(trainLocation, station.location)
-            }
+        // In your SmartRailUI composable:
+        TrainMapView(
+            trainLocation = trainLocation,
+            stationLocation = stationLocation
         )
-
-        TrainDropdown()
 
         // Distance Info
         DistanceCard(distance)
 
-        // Train Info Card
-        TrainInfoCard(trainStatus, expectedArrival)
-
-        // Gate Control
-        GateControlSwitch(gateControl) { gateControl = it }
-
-        LightControlSwitch(lightControl) {lightControl = it}
-    }
-}
-
-data class Station(val name: String, val location: LatLng)
-
-@Composable
-fun StationDropdown(
-    stations: List<Station>,
-    selectedStation: String,
-    onStationSelected: (Station) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    // This box will contain both the button and dropdown
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .wrapContentSize(Alignment.TopStart)  // Important for dropdown positioning
-    ) {
-        // The button that triggers the dropdown
-        OutlinedButton(
-            onClick = { expanded = true },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = selectedStation,
-                modifier = Modifier.weight(1f),
-                textAlign = TextAlign.Start
-            )
-            Icon(
-                imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.ArrowDropDown,
-                contentDescription = "Dropdown arrow"
-            )
-        }
-
-        // The dropdown menu
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier.fillMaxWidth(0.9f)
-        ) {
-            when {
-                stations.isEmpty() -> {
-                    DropdownMenuItem(
-                        text = { Text("Loading stations...") },
-                        onClick = { expanded = false }
-                    )
-                }
-                else -> {
-                    stations.forEach { station ->
-                        DropdownMenuItem(
-                            text = { Text(station.name) },
-                            onClick = {
-                                onStationSelected(station)
-                                expanded = false
-                            }
-                        )
-                    }
-                }
-            }
-        }
+        // Control Switches
+        GateControlSwitch(gateControl, ::onGateControlChanged)
+        LightControlSwitch(lightControl, ::onLightControlChanged)
+        BuzzerControlSwitch(buzzerControl, ::onBuzzerControlChanged)
     }
 }
 
 @Composable
-fun TrainDropdown() {
-    val trains = listOf("46") // Only one train
-    var selectedTrain by remember { mutableStateOf("Select Train") }
-    var expanded by remember { mutableStateOf(false) }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .wrapContentSize(Alignment.TopStart)
-    ) {
-        OutlinedButton(
-            onClick = { expanded = true },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = selectedTrain,
-                modifier = Modifier.weight(1f),
-                textAlign = TextAlign.Start
-            )
-            Icon(
-                imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.ArrowDropDown,
-                contentDescription = "Dropdown arrow"
-            )
-        }
-
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier.fillMaxWidth(0.9f)
-        ) {
-            trains.forEach { train ->
-                DropdownMenuItem(
-                    text = { Text("Train $train") },
-                    onClick = {
-                        selectedTrain = train
-                        expanded = false
-                    }
-                )
-            }
-        }
-    }
-}
-
-
-@Composable
-fun MapView(trainLocation: LatLng, stationLocation: LatLng) {
+fun TrainMapView(trainLocation: LatLng, stationLocation: LatLng) {
     val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(stationLocation, 12f)
+        position = CameraPosition.fromLatLngZoom(stationLocation, 10f)
     }
+
+    cameraPositionState.position = CameraPosition.fromLatLngZoom(stationLocation, 10f)
+
 
     GoogleMap(
-        modifier = Modifier.fillMaxWidth().height(200.dp),
-        cameraPositionState = cameraPositionState
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(200.dp),
+        cameraPositionState = cameraPositionState,
+        properties = MapProperties(isBuildingEnabled = true),
+        uiSettings = MapUiSettings(zoomControlsEnabled = false)
     ) {
-        Marker(state = MarkerState(position = stationLocation), title = "Station")
-        Marker(state = MarkerState(position = trainLocation), title = "Train")
+        Marker(
+            state = MarkerState(position = stationLocation),
+            title = "Station",
+            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
+        )
+        Marker(
+            state = MarkerState(position = trainLocation),
+            title = "Train",
+            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
+        )
     }
 }
-
-fun calculateDistance(start: LatLng, end: LatLng): Double {
-    val r = 6371 // Radius of Earth in km
-    val dLat = Math.toRadians(end.latitude - start.latitude)
-    val dLon = Math.toRadians(end.longitude - start.longitude)
-    val a = sin(dLat / 2) * sin(dLat / 2) +
-            cos(Math.toRadians(start.latitude)) * cos(Math.toRadians(end.latitude)) *
-            sin(dLon / 2) * sin(dLon / 2)
-    val c = 2 * atan2(sqrt(a), sqrt(1 - a))
-    return r * c
-}
-
-@Composable
-fun DropdownMenuExample(selectedStation: String, onStationSelected: (String) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    val stations = listOf("Nattandiya Station", "Colombo Fort", "Kandy")
-
-    Box {
-        Button(onClick = { expanded = true }) { Text(selectedStation) }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            stations.forEach { station ->
-                DropdownMenuItem(
-                    text = { Text("Select Station") },  // ✅ Correct way to set text
-                    onClick = {
-                    onStationSelected(station)
-                    expanded = false
-                })
-            }
-        }
-    }
-}
-
 
 @Composable
 fun DistanceCard(distance: Double) {
+    var showWarningDialog by remember { mutableStateOf(false) }
+
+    // Show warning dialog when distance becomes less than 5
+    LaunchedEffect(distance) {
+        if (distance < 5 && distance > 0) { // >0 to avoid showing on initial load
+            showWarningDialog = true
+        }
+    }
+
+    // Warning Dialog
+    if (showWarningDialog) {
+        AlertDialog(
+            onDismissRequest = { showWarningDialog = false },
+            title = {
+                Text(
+                    text = "Warning!",
+                    color = Color.Red,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text("Train is approaching (${"%.1f".format(distance)} km away)! Please close the gates immediately.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showWarningDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                ) {
+                    Text("OK", color = Color.White)
+                }
+            }
+        )
+    }
+
+    // Card implementation remains the same
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -528,48 +569,32 @@ fun DistanceCard(distance: Double) {
                 .fillMaxWidth()
                 .background(
                     brush = Brush.linearGradient(
-                        colors = listOf(Color(0xFFE1F5FE), Color(0xFFB3E5FC)) // much lighter blue gradient
+                        colors = if (distance < 5) {
+                            listOf(Color(0xFFFFEBEE), Color(0xFFFFCDD2)) // Red gradient
+                        } else {
+                            listOf(Color(0xFFE1F5FE), Color(0xFFB3E5FC)) // Blue gradient
+                        }
                     )
-        )
+                )
                 .padding(16.dp)
         ) {
             Column {
                 Text(text = "Distance to the station:", fontSize = 16.sp)
                 Text(
-                    text = "${String.format("%.1f", distance)} km",
+                    text = "${"%.1f".format(distance)} km",
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1877F2)
+                    color = if (distance < 5) Color(0xFFD32F2F) else Color(0xFF1877F2)
                 )
-            }
-        }
-    }
-}
-
-
-@Composable
-fun TrainInfoCard(status: String, expectedArrival: String) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp),
-        elevation = CardDefaults.cardElevation(4.dp),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    brush = Brush.linearGradient(
-                        colors = listOf(Color(0xFFE1F5FE), Color(0xFFB3E5FC)) // light blue gradient
+                if (distance < 5) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Warning: Close the gates!",
+                        color = Color(0xFFD32F2F),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
                     )
-                )
-                .padding(16.dp)
-        ) {
-            Column {
-                Text("Train Number: 046", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Text("Status: $status", fontSize = 16.sp)
-                Text("Expected Arrival: $expectedArrival", fontSize = 16.sp)
+                }
             }
         }
     }
@@ -583,8 +608,8 @@ fun GateControlSwitch(gateControl: Boolean, onGateControlChange: (Boolean) -> Un
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Image(
-            painter = painterResource(id = R.drawable.gate), // Replace with your railgate icon
-            contentDescription = "Light Control Icon",
+            painter = painterResource(id = R.drawable.gate),
+            contentDescription = "Gate Control Icon",
             modifier = Modifier.size(24.dp)
         )
         Text("Gate Control", fontSize = 18.sp)
@@ -600,13 +625,41 @@ fun LightControlSwitch(lightControl: Boolean, onLightControlChange: (Boolean) ->
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Image(
-            painter = painterResource(id = R.drawable.alert), // Replace with your railgate icon
+            painter = painterResource(id = R.drawable.alert),
             contentDescription = "Light Control Icon",
             modifier = Modifier.size(24.dp)
         )
-        Text("light Control", fontSize = 18.sp)
+        Text("Light Control", fontSize = 18.sp)
         Switch(checked = lightControl, onCheckedChange = onLightControlChange)
     }
+}
+
+@Composable
+fun BuzzerControlSwitch(buzzerControl: Boolean, onBuzzerControlChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.alert), // You might want to use a different icon for buzzer
+            contentDescription = "Buzzer Control Icon",
+            modifier = Modifier.size(24.dp)
+        )
+        Text("Buzzer Control", fontSize = 18.sp)
+        Switch(checked = buzzerControl, onCheckedChange = onBuzzerControlChange)
+    }
+}
+
+fun calculateDistance(start: LatLng, end: LatLng): Double {
+    val r = 6371 // Radius of Earth in km
+    val dLat = Math.toRadians(end.latitude - start.latitude)
+    val dLon = Math.toRadians(end.longitude - start.longitude)
+    val a = sin(dLat / 2) * sin(dLat / 2) +
+            cos(Math.toRadians(start.latitude)) * cos(Math.toRadians(end.latitude)) *
+            sin(dLon / 2) * sin(dLon / 2)
+    val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return r * c
 }
 
 @Preview(showBackground = true)
